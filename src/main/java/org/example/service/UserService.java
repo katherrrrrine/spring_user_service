@@ -1,5 +1,6 @@
 package org.example.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.dto.UserDto;
 import org.example.exception.*;
 import org.example.mapper.UserMapper;
@@ -7,10 +8,15 @@ import org.example.model.User;
 import org.example.dao.UserRepository;
 import org.example.validation.UserInputValidator;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -19,10 +25,19 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
+
+    @Value("${app.kafka.topic.user-events:user-events}")
+    private String userEventsTopic;
 
     @Autowired
-    public UserService(UserRepository userRepository) {
+    public UserService(UserRepository userRepository,
+                       KafkaTemplate<String, String> kafkaTemplate,
+                       ObjectMapper objectMapper) {
         this.userRepository = userRepository;
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public UserDto createUser(UserDto userDto) {
@@ -34,6 +49,7 @@ public class UserService {
 
         User user = UserMapper.toEntity(userDto);
         User savedUser = userRepository.save(user);
+        sendUserEvent(savedUser.getId(), savedUser.getEmail(), "CREATED");
         return UserMapper.toDto(savedUser);
     }
 
@@ -50,9 +66,10 @@ public class UserService {
     @Transactional(readOnly = true)
     public List<UserDto> findAllUsers() {
         try {
-            return userRepository.findAll().stream()
+            List<UserDto> users = userRepository.findAll().stream()
                     .map(UserMapper::toDto)
                     .collect(Collectors.toList());
+            return users;
         } catch (Exception e) {
             throw new UserDaoException("Ошибка при получении списка пользователей", e);
         }
@@ -93,14 +110,33 @@ public class UserService {
             throw new UserValidationException("Неверный ID пользователя для удаления");
         }
 
-        if (!userRepository.existsById(id)) {
+        Optional<User> userOpt = userRepository.findById(id);
+        if (userOpt.isEmpty()) {
             throw new UserNotFoundException("Пользователь с ID " + id + " не найден");
         }
 
+        User user = userOpt.get();
+        String email = user.getEmail();
         try {
             userRepository.deleteById(id);
+            sendUserEvent(id, email, "DELETED");
         } catch (Exception e) {
             throw new UserDaoException("Ошибка при удалении пользователя с ID: " + id, e);
+        }
+    }
+
+    private void sendUserEvent(Long userId, String email, String eventType) {
+        try {
+            Map<String, Object> event = new HashMap<>();
+            event.put("eventType", eventType);
+            event.put("email", email);
+            event.put("userId", userId);
+            event.put("timestamp", LocalDateTime.now().toString());
+
+            String eventJson = objectMapper.writeValueAsString(event);
+            kafkaTemplate.send(userEventsTopic, eventJson);
+        } catch (Exception e) {
+            throw new SendMessageException("Ошибка при отправке сообщения");
         }
     }
 }
