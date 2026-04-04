@@ -31,7 +31,6 @@ public class UserService {
     @Value("${app.kafka.topic.user-events:user-events}")
     private String userEventsTopic;
 
-    @Autowired
     public UserService(UserRepository userRepository,
                        KafkaTemplate<String, String> kafkaTemplate,
                        ObjectMapper objectMapper) {
