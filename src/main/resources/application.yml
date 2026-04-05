@@ -30,6 +30,19 @@ app:
 server:
   port: 8080
 
+springdoc:
+  api-docs:
+    path: /api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+    tagsSorter: alpha
+    try-it-out-enabled: true
+    filter: true
+  show-actuator: true
+  paths-to-match: /api/**
+
 logging:
   level:
     root: INFO
